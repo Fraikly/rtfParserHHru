@@ -8,15 +8,24 @@ class ParserController extends Controller
 {
     public function store(ParserRequest $request)
     {
+       if(pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION)!="doc") {
+           http_response_code(401);
+           echo 'Wrong file extension. Try *.doc';
+           exit;
+       }
+
         $employment_histories_json = [];
         $resume_languages_json = [];
         $resume_educations_json = [];
         $resume = [];
 
         $file = $request->file('file');
+
+
         $document = $this->rtf2text($file);
         $linesArray = $this->getFormattedDoc($document);
 
+        if(!str_contains($linesArray[0],"heading"))
         for ($i = 0; $i < count($linesArray); $i++) {
             if (str_contains($linesArray[$i], "Опыт работы")) {
                 $workInfo = $this->getWorkInfo($linesArray, $i);
@@ -47,6 +56,15 @@ class ParserController extends Controller
 
     private function getLanguageInfo($linesArray, $numLine): array
     {
+        $foreignLanguageLevels = [
+            'A1'=> 'A1 - Начальный уровень',
+            'A2'=> 'A2 - Базовый уровень',
+            'B1'=> 'B1 - Средний уровень',
+            'B2'=> 'B2 - Выше среднего',
+            'C1'=> 'C1 - Продвинутый уровень',
+            'C2'=> 'C2 - Владение в совершенстве',
+        ];
+
         $languageInfo = array();
         $languageCount = -1;
         $lastLanguage = false;
@@ -61,6 +79,12 @@ class ParserController extends Controller
             $languageName = trim($words[0]);
             for ($j = 1; $j < count($words); $j++) {
                 $languageLevel .= trim($words[$j]);
+                foreach ($foreignLanguageLevels as $key => $foreignLanguageLevel){
+                    if(str_contains($languageLevel,$key)){
+                        $languageLevel = $foreignLanguageLevel;
+                        break 2;
+                    }
+                }
                 if ($j != count($words) - 1) {
                     $languageLevel .= " - ";
                 }
@@ -177,8 +201,6 @@ class ParserController extends Controller
                 ];
                 $workDates = explode($monthInfo["name"], $linesArray[$i])[1];
 
-                $workInfo[$workCount] += $this->getWorkExperienceTime($linesArray[$i + 1]);
-
                 $workInfo[$workCount] += $this->getEmploymentAndDismissalDate($monthInfo["name"] . $workDates, $monthInfo["num"]);
 
                 $employerInfo = $this->getEmployerInfo($linesArray, $i);
@@ -236,28 +258,6 @@ class ParserController extends Controller
 
     }
 
-    private function getWorkExperienceTime($str): array
-    {
-        $years = null;
-        $month = null;
-        $words = explode(' ', $str);
-        for ($i = 0; $i < count($words); $i++) {
-            if (is_numeric($words[$i])) {
-                if (str_starts_with($words[$i + 1], "месяц")) {
-                    $month = $words[$i];
-                } else
-                    $years = $words[$i];
-            }
-
-        }
-        return [
-            "work_experience_time" => [
-                'years' => $years,
-                'month' => $month
-            ]
-        ];
-
-    }
 
     private  function getEmploymentAndDismissalDate($str, $monthNum): array
     {
@@ -270,16 +270,23 @@ class ParserController extends Controller
                 $monthNum++;
                 $employment_date = $this->getDate("01", $monthNum, $year);
             } else {
+                if(str_contains($date,"настоящее время")){
+                    break;
+                }
+
                 $monthInfo = $this->findMonth($date);
-
                 if ($monthInfo != null) {
+                    $year='';
+                    $wordNum=2;
+                    while (!is_numeric($year)){
+                        $year = explode(' ', $date)[$wordNum];
+                        $wordNum++;
+                    }
 
-                    $year = explode(' ', $date)[3];
                     $monthNum = $monthInfo["num"] + 1;
                     $dismissal_date = $this->getDate("01", $monthNum, $year);
                 }
             }
-
         }
         return [
             "employment_date" => $employment_date,
@@ -501,24 +508,26 @@ class ParserController extends Controller
 
     private function getFormattedDoc($doc): array
     {
+
         $formattedLinesArray = [];
         $separator = "~~~";
+        $encoding=false;
 
         $linesArray = explode("\n", $doc);
+
         unset($linesArray[0], $linesArray[1], $linesArray[3]);
         $linesArray = array_values($linesArray);
-
-        foreach ($linesArray as $line) {
-            if ($line != " " or $line != "") {
-
+        for($i=0;$i<count($linesArray);$i++){
+            $line = $linesArray[$i];
+            if ($line != " " or $line != ""){
                 $line = preg_replace('`(\b[А-ЯЁA-Z]{2,})`u', "{$separator}$0{$separator}", $line);
                 $line = trim(preg_replace('#\w\K[A-ZЁА-Я]#u', ". $0", $line));
 
                 if (str_contains($line, $separator)) {
                     $abriviatArray = explode($separator, $line);
                     $numLastElem = count($abriviatArray) - 1;
-                    for ($i = 1; $i < $numLastElem; $i++) {
-                        $abriviatArray[$i] = str_replace('. ', "", $abriviatArray[$i]);
+                    for ($j = 1; $j < $numLastElem; $j++) {
+                        $abriviatArray[$j] = str_replace('. ', "", $abriviatArray[$j]);
                     }
                     if ($abriviatArray[$numLastElem] != '') {
                         $firstLetterOfTheLastElem = mb_substr($abriviatArray[$numLastElem], 0, 1);
@@ -532,35 +541,23 @@ class ParserController extends Controller
 
                     $line = implode("", $abriviatArray);
                 }
+
+                $formattedLinesArray[] = $line;
             }
-            $formattedLinesArray[] = $line;
+
+
         }
+        if($encoding){
+            unset($formattedLinesArray[count($formattedLinesArray)-1]);
+        }
+
         return $formattedLinesArray;
     }
 
-
+private function decodeString($str): bool|string
+{
+    $str = iconv('utf-8', 'cp1252//IGNORE', $str);
+    return iconv("windows-1251","utf-8",$str);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+}
