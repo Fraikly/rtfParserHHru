@@ -163,8 +163,8 @@ class ParserController extends Controller
                     if ($i != $numLine) {
                         $educationInfo = $this->getEducationType('faculty_name', $word, $linesArray[$i], $educationInfo, $educationCount);
                     }
-                    $start_date = $this->getDate("01", "09", $word);
-                    $finish_date = $this->getDate("01", "09", $word, "-4 years");
+                    $start_date = $this->getDate("01", "09", $word, "-4 years");
+                    $finish_date = $this->getDate("01", "09", $word);
                     $educationInfo = $this->getEducationType('institution_name', $word, $linesArray[$i], $educationInfo, $educationCount);
                     $educationInfo[$educationCount] += [
                         "id" => $educationCount,
